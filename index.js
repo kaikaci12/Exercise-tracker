@@ -93,6 +93,14 @@ app.post(
     }
   }
 );
+app.get("/api/users", async (req, res) => {
+  try {
+    const users = await User.find(); // Fetch all users from the database
+    res.status(200).json(users); // Send the users as a JSON response
+  } catch (error) {
+    res.status(500).json({ error: "Server error: " + error.message });
+  }
+});
 
 const listener = app.listen(process.env.PORT || 3000, () => {
   console.log("Your app is listening on port " + listener.address().port);
