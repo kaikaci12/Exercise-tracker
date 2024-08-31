@@ -23,22 +23,28 @@ const User = require("./schemas/User.js");
 
 app.post("/api/users", async (req, res) => {
   const { username } = req.body;
+  if (!username) {
+    return res.status(401).send({ error: "please provide the username" });
+  }
   const newUser = await User.create({
     username: username,
+  });
+  res.status(200).json({
+    username,
+    _id: newUser._id,
   });
 });
 app.post(
   "/api/users/:_id/exercises",
   [
-    body("description").notEmpty().withMessage("description cannot be empty"),
+    body("description").notEmpty().withMessage("Description cannot be empty"),
     body("duration")
       .notEmpty()
-      .withMessage("duration is required")
+      .withMessage("Duration is required")
       .isNumeric()
-      .withMessage("duration must be a number"),
+      .withMessage("Duration must be a number"),
     body("date")
-      .notEmpty()
-      .withMessage("date cannot be empty")
+      .optional() // Allow date to be optional
       .isDate()
       .withMessage("Invalid date format"),
   ],
@@ -46,36 +52,48 @@ app.post(
     const userId = req.params._id;
     const result = validationResult(req);
 
+    // Handle validation errors
     if (!result.isEmpty()) {
-      return res.status(400).send({ errors: result.array() });
+      return res.status(400).json({ errors: result.array() });
     }
 
     const data = matchedData(req);
     const { description, duration, date } = data;
-    const findUser = await User.findById(userId);
 
-    if (!findUser) {
-      return res
-        .status(404)
-        .send(`User with the id of ${userId} doesn't exist`);
+    try {
+      // Find the user by ID
+      const user = await User.findById(userId);
+      if (!user) {
+        return res
+          .status(404)
+          .json({ error: `User with ID ${userId} not found` });
+      }
+
+      // Update the user's document
+      user.description = description;
+      user.duration = duration;
+      user.date = date
+        ? new Date(date).toDateString()
+        : new Date().toDateString(); // Use current date if not provided
+
+      // Save the updated document
+      const updatedUser = await user.save();
+
+      // Send back the updated user data
+      res.status(200).json({
+        id: updatedUser._id,
+        username: updatedUser.username,
+        description: updatedUser.description,
+        duration: updatedUser.duration,
+        date: updatedUser.date,
+      });
+    } catch (error) {
+      // Handle errors properly
+      res.status(500).json({ error: "Server error: " + error.message });
     }
-
-    // Update the user's document
-    findUser.description = description;
-    findUser.duration = duration;
-    findUser.date = new Date(date).toISOString(); // Format the date
-
-    // Save the updated document
-    const updatedUser = await findUser.save();
-
-    res.status(200).json({
-      username: updatedUser.username,
-      description: updatedUser.description,
-      duration: updatedUser.duration,
-      date: updatedUser.date,
-    });
   }
 );
+
 const listener = app.listen(process.env.PORT || 3000, () => {
   console.log("Your app is listening on port " + listener.address().port);
 });
