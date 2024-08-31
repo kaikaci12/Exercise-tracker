@@ -45,21 +45,35 @@ app.post(
   async (req, res) => {
     const userId = req.params._id;
     const result = validationResult(req);
+
     if (!result.isEmpty()) {
       return res.status(400).send({ errors: result.array() });
     }
+
     const data = matchedData(req);
-
-    console.log(data);
-    res.send(data);
-
-    const { description, duration, date } = req.body;
+    const { description, duration, date } = data;
     const findUser = await User.findById(userId);
+
     if (!findUser) {
       return res
         .status(404)
-        .send(`Failed to Add excersise to the user with the id of ${userId}`);
+        .send(`User with the id of ${userId} doesn't exist`);
     }
+
+    // Update the user's document
+    findUser.description = description;
+    findUser.duration = duration;
+    findUser.date = new Date(date).toISOString(); // Format the date
+
+    // Save the updated document
+    const updatedUser = await findUser.save();
+
+    res.status(200).json({
+      username: updatedUser.username,
+      description: updatedUser.description,
+      duration: updatedUser.duration,
+      date: updatedUser.date,
+    });
   }
 );
 const listener = app.listen(process.env.PORT || 3000, () => {
