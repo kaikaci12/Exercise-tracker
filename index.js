@@ -101,6 +101,27 @@ app.get("/api/users", async (req, res) => {
     res.status(500).json({ error: "Server error: " + error.message });
   }
 });
+app.get("/api/users/:_id/logs", async (req, res) => {
+  const userId = req.params._id;
+  try {
+    const findUser = User.findById(userId);
+    const log = [
+      {
+        description: findUser.description,
+        duration: findUser.duration,
+        date: findUser.date,
+      },
+    ];
+    res.status(200).json({
+      id: findUser._id,
+      username: findUser.username,
+      count: log.length,
+      log,
+    });
+  } catch (error) {
+    return res.status(404).send(error.message);
+  }
+});
 
 const listener = app.listen(process.env.PORT || 3000, () => {
   console.log("Your app is listening on port " + listener.address().port);
