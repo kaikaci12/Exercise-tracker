@@ -19,21 +19,36 @@ app.get("/", (req, res) => {
   res.sendFile(__dirname + "/views/index.html");
 });
 
-const User = require("./schemas/User.js");
+const { User, Exercise } = require("./schemas/User.js");
 
 app.post("/api/users", async (req, res) => {
   const { username } = req.body;
+
   if (!username) {
-    return res.status(401).send({ error: "please provide the username" });
+    return res.status(400).json({ error: "Please provide a username" });
   }
-  const newUser = await User.create({
-    username: username,
-  });
-  res.status(200).json({
-    username,
-    _id: newUser._id,
-  });
+
+  try {
+    // Check if the username already exists
+    const existingUser = await User.findOne({ username });
+    if (existingUser) {
+      return res.status(409).json({ error: "Username already exists" });
+    }
+
+    // If not, create a new user
+    const newUser = await User.create({ username });
+    res.status(201).json({
+      username: newUser.username,
+      _id: newUser._id,
+    });
+  } catch (error) {
+    // Handle any other errors
+    res.status(500).json({ error: "Server error: " + error.message });
+  }
 });
+
+const moment = require("moment");
+
 app.post(
   "/api/users/:_id/exercises",
   [
@@ -44,24 +59,33 @@ app.post(
       .isNumeric()
       .withMessage("Duration must be a number"),
     body("date")
-      .optional() // Allow date to be optional
-      .isDate()
-      .withMessage("Invalid date format"),
+      .optional()
+      .custom((value) => {
+        if (value && !moment(value, "YYYY-MM-DD", true).isValid()) {
+          throw new Error("Invalid date format, please use YYYY-MM-DD");
+        }
+        return true;
+      }),
   ],
   async (req, res) => {
     const userId = req.params._id;
     const result = validationResult(req);
 
-    // Handle validation errors
     if (!result.isEmpty()) {
       return res.status(400).json({ errors: result.array() });
     }
 
     const data = matchedData(req);
-    const { description, duration, date } = data;
+    let { description, duration, date } = data;
+
+    // If no date is provided, use the current date
+    if (!date) {
+      date = new Date();
+    } else {
+      date = new Date(date);
+    }
 
     try {
-      // Find the user by ID
       const user = await User.findById(userId);
       if (!user) {
         return res
@@ -69,57 +93,131 @@ app.post(
           .json({ error: `User with ID ${userId} not found` });
       }
 
-      // Update the user's document
-      user.description = description;
-      user.duration = duration;
-      user.date = date
-        ? new Date(date).toDateString()
-        : new Date().toDateString(); // Use current date if not provided
+      const exercise = {
+        description,
+        duration: parseInt(duration),
+        date: date.toDateString(), // Convert to a readable string
+      };
+      user.exercises.push(exercise); // Add exercise to the user's exercises array
+      await user.save(); // Save the user document
+      // await Exercise.create({
+      //   _id: user._id,
+      //   username: user.username,
+      //   description: description,
+      //   duration: parseInt(duration),
+      //   date: exercise.date,
+      // });
 
-      // Save the updated document
-      const updatedUser = await user.save();
-
-      // Send back the updated user data
       res.status(200).json({
-        id: updatedUser._id,
-        username: updatedUser.username,
-        description: updatedUser.description,
-        duration: updatedUser.duration,
-        date: updatedUser.date,
+        _id: user._id,
+        username: user.username,
+        description: exercise.description,
+        duration: exercise.duration,
+        date: exercise.date,
       });
     } catch (error) {
-      // Handle errors properly
       res.status(500).json({ error: "Server error: " + error.message });
     }
   }
 );
+
 app.get("/api/users", async (req, res) => {
   try {
-    const users = await User.find(); // Fetch all users from the database
-    res.status(200).json(users); // Send the users as a JSON response
+    const users = await User.find();
+    res.status(200).json(users);
   } catch (error) {
     res.status(500).json({ error: "Server error: " + error.message });
   }
 });
+
+app.get("/api/users", async (req, res) => {
+  try {
+    const users = await User.find();
+    res.status(200).json(users);
+  } catch (error) {
+    res.status(500).json({ error: "Server error: " + error.message });
+  }
+});
+
 app.get("/api/users/:_id/logs", async (req, res) => {
   const userId = req.params._id;
+
   try {
-    const findUser = User.findById(userId);
-    const log = [
-      {
-        description: findUser.description,
-        duration: findUser.duration,
-        date: findUser.date,
-      },
-    ];
+    // Find the user by ID and return only the necessary fields
+    const user = await User.findById(userId);
+    console.log(user);
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: `User with ID ${userId} not found` });
+    }
+
+    // Build the log array from the user's exercises
+    const log = user.exercises.map((exercise) => ({
+      description: exercise.description,
+      duration: exercise.duration,
+      date: exercise.date,
+    }));
+
+    // Return the log along with the count
     res.status(200).json({
-      id: findUser._id,
-      username: findUser.username,
+      username: user.username,
       count: log.length,
+      _id: user._id,
       log,
     });
   } catch (error) {
-    return res.status(404).send(error.message);
+    res.status(500).json({ error: "Server error: " + error.message });
+  }
+});
+app.get("/api/users/:_id/logs/:from?/:to?/:limit?", async (req, res) => {
+  const { from, to, limit } = req.params;
+  const userId = req.params._id;
+
+  try {
+    // Find the user by ID
+    const user = await User.findById(userId);
+    if (!user) {
+      return res
+        .status(404)
+        .json({ error: `User with ID ${userId} not found` });
+    }
+
+    // Parse the 'from' and 'to' dates if provided
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+
+    // Filter exercises based on the date range
+    let filteredExercises = user.exercises.filter((exercise) => {
+      const exerciseDate = new Date(exercise.date);
+      return (
+        (!fromDate || exerciseDate >= fromDate) &&
+        (!toDate || exerciseDate <= toDate)
+      );
+    });
+
+    // Limit the number of exercises if 'limit' is provided
+    if (limit) {
+      filteredExercises = filteredExercises.slice(0, parseInt(limit));
+    }
+
+    // Build the log array
+    const log = filteredExercises.map((exercise) => ({
+      description: exercise.description,
+      duration: exercise.duration,
+      date: exercise.date,
+    }));
+
+    // Return the log along with the count
+    res.status(200).json({
+      username: user.username,
+      count: log.length,
+      _id: user._id,
+      log,
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Server error: " + error.message });
   }
 });
 
